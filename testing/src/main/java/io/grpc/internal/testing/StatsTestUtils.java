@@ -113,35 +113,39 @@ public class StatsTestUtils {
   private static final String EXTRA_TAG_HEADER_VALUE_PREFIX = "extratag:";
   private static final String NO_EXTRA_TAG_HEADER_VALUE_PREFIX = "noextratag";
 
-  public static final class FakeTagContextBinarySerializer extends TagContextBinarySerializer {
+  public static final class FakeStatsRecorder extends StatsRecorder {
 
-    private final FakeTagger tagger = new FakeTagger();
+    private BlockingQueue<MetricsRecord> records;
 
-    @Override
-    public TagContext fromByteArray(byte[] bytes) throws TagContextParseException {
-      String serializedString = new String(bytes, UTF_8);
-      if (serializedString.startsWith(EXTRA_TAG_HEADER_VALUE_PREFIX)) {
-        return tagger.emptyBuilder()
-            .put(EXTRA_TAG,
-                TagValue.create(serializedString.substring(EXTRA_TAG_HEADER_VALUE_PREFIX.length())))
-            .build();
-      } else if (serializedString.startsWith(NO_EXTRA_TAG_HEADER_VALUE_PREFIX)) {
-        return tagger.empty();
-      } else {
-        throw new TagContextParseException("Malformed value");
-      }
+    public FakeStatsRecorder() {
+      rolloverRecords();
     }
 
     @Override
-    public byte[] toByteArray(TagContext tags) {
-      // The default TagContext is a special case, because it isn't an instance of FakeTagContext.
-      TagValue extraTagValue =
-          tags instanceof FakeTagContext ? ((FakeTagContext) tags).getTags().get(EXTRA_TAG) : null;
-      if (extraTagValue == null) {
-        return NO_EXTRA_TAG_HEADER_VALUE_PREFIX.getBytes(UTF_8);
-      } else {
-        return (EXTRA_TAG_HEADER_VALUE_PREFIX + extraTagValue.asString()).getBytes(UTF_8);
-      }
+    public StatsRecord newRecord() {
+      return new FakeStatsRecord(this);
+    }
+
+    public MetricsRecord pollRecord() {
+      return getCurrentRecordSink().poll();
+    }
+
+    public MetricsRecord pollRecord(long timeout, TimeUnit unit) throws InterruptedException {
+      return getCurrentRecordSink().poll(timeout, unit);
+    }
+
+    /**
+     * Disconnect this tagger with the contexts it has created so far.  The records from those
+     * contexts will not show up in {@link #pollRecord}.  Useful for isolating the records between
+     * test cases.
+     */
+    // This needs to be synchronized with getCurrentRecordSink() which may run concurrently.
+    public synchronized void rolloverRecords() {
+      records = new LinkedBlockingQueue<MetricsRecord>();
+    }
+
+    private synchronized BlockingQueue<MetricsRecord> getCurrentRecordSink() {
+      return records;
     }
   }
 
@@ -182,39 +186,35 @@ public class StatsTestUtils {
     }
   }
 
-  public static final class FakeStatsRecorder extends StatsRecorder {
+  public static final class FakeTagContextBinarySerializer extends TagContextBinarySerializer {
 
-    private BlockingQueue<MetricsRecord> records;
+    private final FakeTagger tagger = new FakeTagger();
 
-    public FakeStatsRecorder() {
-      rolloverRecords();
+    @Override
+    public TagContext fromByteArray(byte[] bytes) throws TagContextParseException {
+      String serializedString = new String(bytes, UTF_8);
+      if (serializedString.startsWith(EXTRA_TAG_HEADER_VALUE_PREFIX)) {
+        return tagger.emptyBuilder()
+            .put(EXTRA_TAG,
+                TagValue.create(serializedString.substring(EXTRA_TAG_HEADER_VALUE_PREFIX.length())))
+            .build();
+      } else if (serializedString.startsWith(NO_EXTRA_TAG_HEADER_VALUE_PREFIX)) {
+        return tagger.empty();
+      } else {
+        throw new TagContextParseException("Malformed value");
+      }
     }
 
     @Override
-    public StatsRecord newRecord() {
-      return new FakeStatsRecord(this);
-    }
-
-    public MetricsRecord pollRecord() {
-      return getCurrentRecordSink().poll();
-    }
-
-    public MetricsRecord pollRecord(long timeout, TimeUnit unit) throws InterruptedException {
-      return getCurrentRecordSink().poll(timeout, unit);
-    }
-
-    /**
-     * Disconnect this tagger with the contexts it has created so far.  The records from those
-     * contexts will not show up in {@link #pollRecord}.  Useful for isolating the records between
-     * test cases.
-     */
-    // This needs to be synchronized with getCurrentRecordSink() which may run concurrently.
-    public synchronized void rolloverRecords() {
-      records = new LinkedBlockingQueue<MetricsRecord>();
-    }
-
-    private synchronized BlockingQueue<MetricsRecord> getCurrentRecordSink() {
-      return records;
+    public byte[] toByteArray(TagContext tags) {
+      // The default TagContext is a special case, because it isn't an instance of FakeTagContext.
+      TagValue extraTagValue =
+          tags instanceof FakeTagContext ? ((FakeTagContext) tags).getTags().get(EXTRA_TAG) : null;
+      if (extraTagValue == null) {
+        return NO_EXTRA_TAG_HEADER_VALUE_PREFIX.getBytes(UTF_8);
+      } else {
+        return (EXTRA_TAG_HEADER_VALUE_PREFIX + extraTagValue.asString()).getBytes(UTF_8);
+      }
     }
   }
 
