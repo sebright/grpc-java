@@ -249,8 +249,9 @@ public abstract class AbstractServerImplBuilder<T extends AbstractServerImplBuil
               : Tags.getTagPropagationComponent().getBinarySerializer();
       StatsRecorder statsRecorder =
           this.statsRecorder != null ? this.statsRecorder : Stats.getStatsRecorder();
-      // How do we check whether stats is enabled? Uncommenting this line causes test failures.
-      // //    if (Stats.getState() == StatsCollectionState.ENABLED) {
+      // // TODO: How do we check whether stats is enabled, now that the StatsRecorder is always
+      // // non-null? Uncommenting this line causes test failures.
+      // if (Stats.getState() == StatsCollectionState.ENABLED) {
       CensusStatsModule censusStats =
           new CensusStatsModule(
               tagger,
@@ -260,8 +261,8 @@ public abstract class AbstractServerImplBuilder<T extends AbstractServerImplBuil
               true,
               recordStats);
       tracerFactories.add(censusStats.getServerTracerFactory());
+      // }
     }
-    //      }
     if (tracingEnabled) {
       CensusTracingModule censusTracing =
           new CensusTracingModule(Tracing.getTracer(),

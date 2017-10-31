@@ -365,8 +365,9 @@ public abstract class AbstractManagedChannelImplBuilder
               : Tags.getTagPropagationComponent().getBinarySerializer();
       StatsRecorder statsRecorder =
           this.statsRecorder != null ? this.statsRecorder : Stats.getStatsRecorder();
-      // How do we check whether stats is enabled? Uncommenting this line causes test failures.
-      // //    if (Stats.getState() == StatsCollectionState.ENABLED) {
+      // // TODO: How do we check whether stats is enabled, now that the StatsRecorder is always
+      // // non-null? Uncommenting this line causes test failures.
+      // if (Stats.getState() == StatsCollectionState.ENABLED) {
       CensusStatsModule censusStats =
           new CensusStatsModule(
               tagger,
@@ -378,6 +379,7 @@ public abstract class AbstractManagedChannelImplBuilder
       // First interceptor runs last (see ClientInterceptors.intercept()), so that no
       // other interceptor can override the tracer factory we set in CallOptions.
       effectiveInterceptors.add(0, censusStats.getClientInterceptor());
+                               // }
     }
     if (tracingEnabled) {
       CensusTracingModule censusTracing =
