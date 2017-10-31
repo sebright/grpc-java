@@ -275,15 +275,6 @@ public class StatsTestUtils {
     }
 
     @Override
-    public boolean equals(Object other) {
-      if (!(other instanceof FakeTagContext)) {
-        return false;
-      }
-      FakeTagContext otherCtx = (FakeTagContext) other;
-      return tags.equals(otherCtx.tags);
-    }
-
-    @Override
     protected Iterator<Tag> getIterator() {
       return Iterators.transform(
           tags.entrySet().iterator(),
