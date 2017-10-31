@@ -16,19 +16,19 @@
 
 package io.grpc.testing.protobuf;
 
-// import static com.google.common.truth.Truth.assertThat;
+import static com.google.common.truth.Truth.assertThat;
 import static io.grpc.MethodDescriptor.MethodType.BIDI_STREAMING;
 import static io.grpc.MethodDescriptor.MethodType.CLIENT_STREAMING;
 import static io.grpc.MethodDescriptor.MethodType.SERVER_STREAMING;
 import static io.grpc.MethodDescriptor.MethodType.UNARY;
 import static org.junit.Assert.assertEquals;
-// import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNotNull;
 
 import io.grpc.MethodDescriptor;
-// import io.opencensus.trace.Tracing;
-// import io.opencensus.trace.export.SampledSpanStore;
-// import java.util.ArrayList;
-// import java.util.Set;
+import io.opencensus.trace.Tracing;
+import io.opencensus.trace.export.SampledSpanStore;
+import java.util.ArrayList;
+import java.util.Set;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.JUnit4;
@@ -58,29 +58,33 @@ public class SimpleServiceTest {
     assertEquals(BIDI_STREAMING, genericTypeShouldMatchWhenAssigned.getType());
   }
 
-  // // TODO: Update this test for the new version of OpenCensus.
-  // @Test
-  // public void registerSampledMethodsForTracing() throws Exception {
-  //   // Make sure SimpleServiceGrpc and CensusTracingModule classes are loaded.
-  //   assertNotNull(Class.forName(SimpleServiceGrpc.class.getName()));
-  //   assertNotNull(Class.forName("io.grpc.internal.CensusTracingModule"));
+  @Test
+  public void registerSampledMethodsForTracing() throws Exception {
+    // Make sure SimpleServiceGrpc and CensusTracingModule classes are loaded.
+    assertNotNull(Class.forName(SimpleServiceGrpc.class.getName()));
+    assertNotNull(Class.forName("io.grpc.internal.CensusTracingModule"));
 
-  //   String[] methodNames = new String[] {
-  //     "grpc.testing.SimpleService/UnaryRpc",
-  //     "grpc.testing.SimpleService/ClientStreamingRpc",
-  //     "grpc.testing.SimpleService/ServerStreamingRpc",
-  //     "grpc.testing.SimpleService/BidiStreamingRpc"};
+    String[] methodNames = new String[] {
+      "grpc.testing.SimpleService/UnaryRpc",
+      "grpc.testing.SimpleService/ClientStreamingRpc",
+      "grpc.testing.SimpleService/ServerStreamingRpc",
+      "grpc.testing.SimpleService/BidiStreamingRpc"};
 
-  //   ArrayList<String> expectedSpans = new ArrayList<String>();
-  //   for (String methodName : methodNames) {
-  //     expectedSpans.add(generateTraceSpanName(false, methodName));
-  //     expectedSpans.add(generateTraceSpanName(true, methodName));
-  //   }
+    ArrayList<String> expectedSpans = new ArrayList<String>();
+    for (String methodName : methodNames) {
+      expectedSpans.add(generateTraceSpanName(false, methodName));
+      expectedSpans.add(generateTraceSpanName(true, methodName));
+    }
 
-  //   SampledSpanStore sampledStore = Tracing.getExportComponent().getSampledSpanStore();
-  //   Set<String> registeredSpans = sampledStore.getRegisteredSpanNamesForCollection();
-  //   assertThat(registeredSpans).containsAllIn(expectedSpans);
-  // }
+    // The call to sleep is required because OpenCensus now registers span names asynchronously. It
+    // will be removed soon, because https://github.com/grpc/grpc-java/pull/3627 updates gRPC for
+    // the new asynchronous behavior and removes this test.
+    Thread.sleep(1000);
+
+    SampledSpanStore sampledStore = Tracing.getExportComponent().getSampledSpanStore();
+    Set<String> registeredSpans = sampledStore.getRegisteredSpanNamesForCollection();
+    assertThat(registeredSpans).containsAllIn(expectedSpans);
+  }
 
   /**
    * Copy of {@link io.grpc.internal.CensusTracingModule#generateTraceSpanName} to break dependency.
