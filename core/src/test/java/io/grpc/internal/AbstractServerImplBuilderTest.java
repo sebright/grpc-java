@@ -19,12 +19,9 @@ package io.grpc.internal;
 import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 
-import com.google.instrumentation.stats.StatsContext;
-import com.google.instrumentation.stats.StatsContextFactory;
 import io.grpc.Metadata;
 import io.grpc.ServerStreamTracer;
 import java.io.File;
-import java.io.InputStream;
 import java.util.List;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -33,18 +30,6 @@ import org.junit.runners.JUnit4;
 /** Unit tests for {@link AbstractServerImplBuilder}. */
 @RunWith(JUnit4.class)
 public class AbstractServerImplBuilderTest {
-  private static final StatsContextFactory DUMMY_STATS_FACTORY =
-      new StatsContextFactory() {
-        @Override
-        public StatsContext deserialize(InputStream input) {
-          throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public StatsContext getDefault() {
-          throw new UnsupportedOperationException();
-        }
-      };
 
   private static final ServerStreamTracer.Factory DUMMY_USER_TRACER =
       new ServerStreamTracer.Factory() {
@@ -97,7 +82,7 @@ public class AbstractServerImplBuilderTest {
 
   static class Builder extends AbstractServerImplBuilder<Builder> {
     Builder() {
-      statsContextFactory(DUMMY_STATS_FACTORY);
+      statsImplementation(null, null, null);
     }
 
     @Override

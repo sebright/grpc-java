@@ -260,7 +260,7 @@ public abstract class AbstractServerImplBuilder<T extends AbstractServerImplBuil
               true,
               recordStats);
       tracerFactories.add(censusStats.getServerTracerFactory());
-      }
+    }
     //      }
     if (tracingEnabled) {
       CensusTracingModule censusTracing =

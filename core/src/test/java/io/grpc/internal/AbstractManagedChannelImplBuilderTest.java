@@ -27,8 +27,6 @@ import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 
 import com.google.common.util.concurrent.MoreExecutors;
-import com.google.instrumentation.stats.StatsContext;
-import com.google.instrumentation.stats.StatsContextFactory;
 import io.grpc.CallOptions;
 import io.grpc.Channel;
 import io.grpc.ClientCall;
@@ -38,7 +36,6 @@ import io.grpc.DecompressorRegistry;
 import io.grpc.LoadBalancer;
 import io.grpc.MethodDescriptor;
 import io.grpc.NameResolver;
-import java.io.InputStream;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
@@ -58,19 +55,6 @@ public class AbstractManagedChannelImplBuilderTest {
         public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
             MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
           return next.newCall(method, callOptions);
-        }
-      };
-
-  private static final StatsContextFactory DUMMY_STATS_FACTORY =
-      new StatsContextFactory() {
-        @Override
-        public StatsContext deserialize(InputStream input) {
-          throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public StatsContext getDefault() {
-          throw new UnsupportedOperationException();
         }
       };
 
@@ -346,12 +330,12 @@ public class AbstractManagedChannelImplBuilderTest {
   static class Builder extends AbstractManagedChannelImplBuilder<Builder> {
     Builder(String target) {
       super(target);
-      statsContextFactory(DUMMY_STATS_FACTORY);
+      statsImplementation(null, null, null);
     }
 
     Builder(SocketAddress directServerAddress, String authority) {
       super(directServerAddress, authority);
-      statsContextFactory(DUMMY_STATS_FACTORY);
+      statsImplementation(null, null, null);
     }
 
     @Override

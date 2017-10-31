@@ -17,8 +17,8 @@
 package io.grpc.testing.integration;
 
 import static com.google.common.truth.Truth.assertThat;
-import static com.google.instrumentation.stats.ContextUtils.STATS_CONTEXT_KEY;
 import static io.grpc.testing.integration.Messages.PayloadType.COMPRESSABLE;
+import static io.opencensus.tags.unsafe.ContextUtils.TAG_CONTEXT_KEY;
 import static io.opencensus.trace.unsafe.ContextUtils.CONTEXT_SPAN_KEY;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -40,10 +40,6 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.SettableFuture;
-import com.google.instrumentation.stats.RpcConstants;
-import com.google.instrumentation.stats.StatsContextFactory;
-import com.google.instrumentation.stats.TagKey;
-import com.google.instrumentation.stats.TagValue;
 import com.google.protobuf.BoolValue;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.EmptyProtos.Empty;
@@ -70,11 +66,13 @@ import io.grpc.StatusRuntimeException;
 import io.grpc.auth.MoreCallCredentials;
 import io.grpc.internal.AbstractServerImplBuilder;
 import io.grpc.internal.GrpcUtil;
-import io.grpc.internal.testing.StatsTestUtils.FakeStatsContext;
-import io.grpc.internal.testing.StatsTestUtils.FakeStatsContextFactory;
+import io.grpc.internal.testing.StatsTestUtils;
+import io.grpc.internal.testing.StatsTestUtils.FakeStatsRecorder;
+import io.grpc.internal.testing.StatsTestUtils.FakeTagContext;
+import io.grpc.internal.testing.StatsTestUtils.FakeTagContextBinarySerializer;
+import io.grpc.internal.testing.StatsTestUtils.FakeTagger;
 import io.grpc.internal.testing.StatsTestUtils.MetricsRecord;
 import io.grpc.internal.testing.StatsTestUtils.MockableSpan;
-import io.grpc.internal.testing.StatsTestUtils;
 import io.grpc.internal.testing.TestClientStreamTracer;
 import io.grpc.internal.testing.TestServerStreamTracer;
 import io.grpc.internal.testing.TestStreamTracer;
@@ -95,6 +93,12 @@ import io.grpc.testing.integration.Messages.StreamingInputCallRequest;
 import io.grpc.testing.integration.Messages.StreamingInputCallResponse;
 import io.grpc.testing.integration.Messages.StreamingOutputCallRequest;
 import io.grpc.testing.integration.Messages.StreamingOutputCallResponse;
+import io.opencensus.contrib.grpc.metrics.RpcMeasureConstants;
+import io.opencensus.stats.StatsRecorder;
+import io.opencensus.tags.TagKey;
+import io.opencensus.tags.TagValue;
+import io.opencensus.tags.Tagger;
+import io.opencensus.tags.propagation.TagContextBinarySerializer;
 import io.opencensus.trace.Span;
 import io.opencensus.trace.unsafe.ContextUtils;
 import java.io.IOException;
@@ -148,10 +152,11 @@ public abstract class AbstractInteropTest {
       new AtomicReference<Context>();
   private static ScheduledExecutorService testServiceExecutor;
   private static Server server;
-  private static final FakeStatsContextFactory clientStatsCtxFactory =
-      new FakeStatsContextFactory();
-  private static final FakeStatsContextFactory serverStatsCtxFactory =
-      new FakeStatsContextFactory();
+  private static final FakeTagger tagger = new FakeTagger();
+  private static final FakeTagContextBinarySerializer tagContextBinarySerializer =
+      new FakeTagContextBinarySerializer();
+  private static final FakeStatsRecorder clientStatsRecorder = new FakeStatsRecorder();
+  private static final FakeStatsRecorder serverStatsRecorder = new FakeStatsRecorder();
 
   private static final LinkedBlockingQueue<ServerStreamTracerInfo> serverStreamTracers =
       new LinkedBlockingQueue<ServerStreamTracerInfo>();
@@ -190,7 +195,7 @@ public abstract class AbstractInteropTest {
   protected static final Empty EMPTY = Empty.getDefaultInstance();
 
   protected static void startStaticServer(
-      AbstractServerImplBuilder<?> builder, ServerInterceptor ... interceptors) {
+      AbstractServerImplBuilder<?> builder, ServerInterceptor... interceptors) {
     testServiceExecutor = Executors.newScheduledThreadPool(2);
 
     List<ServerInterceptor> allInterceptors = ImmutableList.<ServerInterceptor>builder()
@@ -207,7 +212,8 @@ public abstract class AbstractInteropTest {
                 new TestServiceImpl(testServiceExecutor),
                 allInterceptors))
         .addStreamTracerFactory(serverStreamTracerFactory);
-    io.grpc.internal.TestingAccessor.setStatsContextFactory(builder, serverStatsCtxFactory);
+    io.grpc.internal.TestingAccessor.setStatsImplementation(
+        builder, tagger, tagContextBinarySerializer, serverStatsRecorder);
     try {
       server = builder.build().start();
     } catch (IOException ex) {
@@ -261,8 +267,8 @@ public abstract class AbstractInteropTest {
         TestServiceGrpc.newBlockingStub(channel).withInterceptors(tracerSetupInterceptor);
     asyncStub = TestServiceGrpc.newStub(channel).withInterceptors(tracerSetupInterceptor);
     requestHeadersCapture.set(null);
-    clientStatsCtxFactory.rolloverRecords();
-    serverStatsCtxFactory.rolloverRecords();
+    clientStatsRecorder.rolloverRecords();
+    serverStatsRecorder.rolloverRecords();
     serverStreamTracers.clear();
   }
 
@@ -276,8 +282,16 @@ public abstract class AbstractInteropTest {
 
   protected abstract ManagedChannel createChannel();
 
-  protected final StatsContextFactory getClientStatsFactory() {
-    return clientStatsCtxFactory;
+  protected final StatsRecorder getClientStatsFactory() {
+    return clientStatsRecorder;
+  }
+
+  protected final Tagger getTagger() {
+    return tagger;
+  }
+
+  protected final TagContextBinarySerializer getTagContextBinarySerializer() {
+    return tagContextBinarySerializer;
   }
 
   /**
@@ -706,7 +720,7 @@ public abstract class AbstractInteropTest {
       // CensusStreamTracerModule record final status in the interceptor, thus is guaranteed to be
       // recorded.  The tracer stats rely on the stream being created, which is not always the case
       // in this test.  Therefore we don't check the tracer stats.
-      MetricsRecord clientRecord = clientStatsCtxFactory.pollRecord(5, TimeUnit.SECONDS);
+      MetricsRecord clientRecord = clientStatsRecorder.pollRecord(5, TimeUnit.SECONDS);
       checkTags(
           clientRecord, false, "grpc.testing.TestService/StreamingInputCall",
           Status.CANCELLED.getCode());
@@ -1029,7 +1043,7 @@ public abstract class AbstractInteropTest {
     if (metricsExpected()) {
       // Stream may not have been created before deadline is exceeded, thus we don't test the tracer
       // stats.
-      MetricsRecord clientRecord = clientStatsCtxFactory.pollRecord(5, TimeUnit.SECONDS);
+      MetricsRecord clientRecord = clientStatsRecorder.pollRecord(5, TimeUnit.SECONDS);
       checkTags(
           clientRecord, false, "grpc.testing.TestService/StreamingOutputCall",
           Status.Code.DEADLINE_EXCEEDED);
@@ -1062,7 +1076,7 @@ public abstract class AbstractInteropTest {
     if (metricsExpected()) {
       // Stream may not have been created when deadline is exceeded, thus we don't check tracer
       // stats.
-      MetricsRecord clientRecord = clientStatsCtxFactory.pollRecord(5, TimeUnit.SECONDS);
+      MetricsRecord clientRecord = clientStatsRecorder.pollRecord(5, TimeUnit.SECONDS);
       checkTags(
           clientRecord, false, "grpc.testing.TestService/StreamingOutputCall",
           Status.Code.DEADLINE_EXCEEDED);
@@ -1086,7 +1100,7 @@ public abstract class AbstractInteropTest {
     // recorded.  The tracer stats rely on the stream being created, which is not the case if
     // deadline is exceeded before the call is created. Therefore we don't check the tracer stats.
     if (metricsExpected()) {
-      MetricsRecord clientRecord = clientStatsCtxFactory.pollRecord(5, TimeUnit.SECONDS);
+      MetricsRecord clientRecord = clientStatsRecorder.pollRecord(5, TimeUnit.SECONDS);
       checkTags(
           clientRecord, false, "grpc.testing.TestService/EmptyCall",
           Status.DEADLINE_EXCEEDED.getCode());
@@ -1104,7 +1118,7 @@ public abstract class AbstractInteropTest {
     }
     assertStatsTrace("grpc.testing.TestService/EmptyCall", Status.Code.OK);
     if (metricsExpected()) {
-      MetricsRecord clientRecord = clientStatsCtxFactory.pollRecord(5, TimeUnit.SECONDS);
+      MetricsRecord clientRecord = clientStatsRecorder.pollRecord(5, TimeUnit.SECONDS);
       checkTags(
           clientRecord, false, "grpc.testing.TestService/EmptyCall",
           Status.DEADLINE_EXCEEDED.getCode());
@@ -1347,9 +1361,9 @@ public abstract class AbstractInteropTest {
     Span clientParentSpan = MockableSpan.generateRandomSpan(new Random());
     Context ctx =
         Context.ROOT.withValues(
-            STATS_CONTEXT_KEY,
-            clientStatsCtxFactory.getDefault().with(
-                StatsTestUtils.EXTRA_TAG, TagValue.create("extra value")),
+            TAG_CONTEXT_KEY,
+            tagger.emptyBuilder().put(
+                StatsTestUtils.EXTRA_TAG, TagValue.create("extra value")).build(),
             ContextUtils.CONTEXT_SPAN_KEY,
             clientParentSpan);
     Context origCtx = ctx.attach();
@@ -1358,7 +1372,7 @@ public abstract class AbstractInteropTest {
       Context serverCtx = contextCapture.get();
       assertNotNull(serverCtx);
 
-      FakeStatsContext statsCtx = (FakeStatsContext) STATS_CONTEXT_KEY.get(serverCtx);
+      FakeTagContext statsCtx = (FakeTagContext) TAG_CONTEXT_KEY.get(serverCtx);
       assertNotNull(statsCtx);
       Map<TagKey, TagValue> tags = statsCtx.getTags();
       boolean tagFound = false;
@@ -1480,7 +1494,7 @@ public abstract class AbstractInteropTest {
       // CensusStreamTracerModule record final status in the interceptor, thus is guaranteed to be
       // recorded.  The tracer stats rely on the stream being created, which is not always the case
       // in this test, thus we will not check that.
-      MetricsRecord clientRecord = clientStatsCtxFactory.pollRecord(5, TimeUnit.SECONDS);
+      MetricsRecord clientRecord = clientStatsRecorder.pollRecord(5, TimeUnit.SECONDS);
       checkTags(
           clientRecord, false, "grpc.testing.TestService/FullDuplexCall",
           Status.DEADLINE_EXCEEDED.getCode());
@@ -1747,7 +1761,7 @@ public abstract class AbstractInteropTest {
     if (metricsExpected()) {
       // CensusStreamTracerModule records final status in interceptor, which is guaranteed to be
       // done before application receives status.
-      MetricsRecord clientRecord = clientStatsCtxFactory.pollRecord();
+      MetricsRecord clientRecord = clientStatsRecorder.pollRecord();
       checkTags(clientRecord, false, method, code);
 
       if (requests != null && responses != null) {
@@ -1779,7 +1793,7 @@ public abstract class AbstractInteropTest {
         try {
           // On the server, the stats is finalized in ServerStreamListener.closed(), which can be
           // run after the client receives the final status.  So we use a timeout.
-          serverRecord = serverStatsCtxFactory.pollRecord(5, TimeUnit.SECONDS);
+          serverRecord = serverStatsRecorder.pollRecord(5, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
           throw new RuntimeException(e);
         }
@@ -1847,12 +1861,12 @@ public abstract class AbstractInteropTest {
       MetricsRecord record, boolean server, String methodName, Status.Code status) {
     assertNotNull("record is not null", record);
     TagValue methodNameTag = record.tags.get(
-        server ? RpcConstants.RPC_SERVER_METHOD : RpcConstants.RPC_CLIENT_METHOD);
+        server ? RpcMeasureConstants.RPC_SERVER_METHOD : RpcMeasureConstants.RPC_CLIENT_METHOD);
     assertNotNull("method name tagged", methodNameTag);
-    assertEquals("method names match", methodName, methodNameTag.toString());
-    TagValue statusTag = record.tags.get(RpcConstants.RPC_STATUS);
+    assertEquals("method names match", methodName, methodNameTag.asString());
+    TagValue statusTag = record.tags.get(RpcMeasureConstants.RPC_STATUS);
     assertNotNull("status tagged", statusTag);
-    assertEquals(status.toString(), statusTag.toString());
+    assertEquals(status.toString(), statusTag.asString());
   }
 
   /**
@@ -1879,7 +1893,7 @@ public abstract class AbstractInteropTest {
       assertThat(tracer.nextInboundEvent()).isEqualTo(String.format("inboundMessage(%d)", seqNo));
       assertThat(tracer.nextInboundEvent()).isEqualTo("inboundMessage()");
       assertThat(tracer.nextInboundEvent()).matches(
-          String.format("inboundMessageRead\\(%d, -?[0-9]+, -?[0-9]+\\)", seqNo)); 
+          String.format("inboundMessageRead\\(%d, -?[0-9]+, -?[0-9]+\\)", seqNo));
       uncompressedReceivedSize += msg.getSerializedSize();
       seqNo++;
     }
@@ -1905,33 +1919,41 @@ public abstract class AbstractInteropTest {
     }
     if (server && serverInProcess()) {
       assertEquals(
-          requests.size(), record.getMetricAsLongOrFail(RpcConstants.RPC_SERVER_REQUEST_COUNT));
+          requests.size(),
+          record.getMetricAsLongOrFail(RpcMeasureConstants.RPC_SERVER_REQUEST_COUNT));
       assertEquals(
-          responses.size(), record.getMetricAsLongOrFail(RpcConstants.RPC_SERVER_RESPONSE_COUNT));
-      assertEquals(uncompressedRequestsSize,
-          record.getMetricAsLongOrFail(RpcConstants.RPC_SERVER_UNCOMPRESSED_REQUEST_BYTES));
-      assertEquals(uncompressedResponsesSize,
-          record.getMetricAsLongOrFail(RpcConstants.RPC_SERVER_UNCOMPRESSED_RESPONSE_BYTES));
-      assertNotNull(record.getMetric(RpcConstants.RPC_SERVER_SERVER_LATENCY));
+          responses.size(),
+          record.getMetricAsLongOrFail(RpcMeasureConstants.RPC_SERVER_RESPONSE_COUNT));
+      assertEquals(
+          uncompressedRequestsSize,
+          record.getMetricAsLongOrFail(RpcMeasureConstants.RPC_SERVER_UNCOMPRESSED_REQUEST_BYTES));
+      assertEquals(
+          uncompressedResponsesSize,
+          record.getMetricAsLongOrFail(RpcMeasureConstants.RPC_SERVER_UNCOMPRESSED_RESPONSE_BYTES));
+      assertNotNull(record.getMetric(RpcMeasureConstants.RPC_SERVER_SERVER_LATENCY));
       // It's impossible to get the expected wire sizes because it may be compressed, so we just
       // check if they are recorded.
-      assertNotNull(record.getMetric(RpcConstants.RPC_SERVER_REQUEST_BYTES));
-      assertNotNull(record.getMetric(RpcConstants.RPC_SERVER_RESPONSE_BYTES));
+      assertNotNull(record.getMetric(RpcMeasureConstants.RPC_SERVER_REQUEST_BYTES));
+      assertNotNull(record.getMetric(RpcMeasureConstants.RPC_SERVER_RESPONSE_BYTES));
     }
     if (!server) {
       assertEquals(
-          requests.size(), record.getMetricAsLongOrFail(RpcConstants.RPC_CLIENT_REQUEST_COUNT));
+          requests.size(),
+          record.getMetricAsLongOrFail(RpcMeasureConstants.RPC_CLIENT_REQUEST_COUNT));
       assertEquals(
-          responses.size(), record.getMetricAsLongOrFail(RpcConstants.RPC_CLIENT_RESPONSE_COUNT));
-      assertEquals(uncompressedRequestsSize,
-          record.getMetricAsLongOrFail(RpcConstants.RPC_CLIENT_UNCOMPRESSED_REQUEST_BYTES));
-      assertEquals(uncompressedResponsesSize,
-          record.getMetricAsLongOrFail(RpcConstants.RPC_CLIENT_UNCOMPRESSED_RESPONSE_BYTES));
-      assertNotNull(record.getMetric(RpcConstants.RPC_CLIENT_ROUNDTRIP_LATENCY));
+          responses.size(),
+          record.getMetricAsLongOrFail(RpcMeasureConstants.RPC_CLIENT_RESPONSE_COUNT));
+      assertEquals(
+          uncompressedRequestsSize,
+          record.getMetricAsLongOrFail(RpcMeasureConstants.RPC_CLIENT_UNCOMPRESSED_REQUEST_BYTES));
+      assertEquals(
+          uncompressedResponsesSize,
+          record.getMetricAsLongOrFail(RpcMeasureConstants.RPC_CLIENT_UNCOMPRESSED_RESPONSE_BYTES));
+      assertNotNull(record.getMetric(RpcMeasureConstants.RPC_CLIENT_ROUNDTRIP_LATENCY));
       // It's impossible to get the expected wire sizes because it may be compressed, so we just
       // check if they are recorded.
-      assertNotNull(record.getMetric(RpcConstants.RPC_CLIENT_REQUEST_BYTES));
-      assertNotNull(record.getMetric(RpcConstants.RPC_CLIENT_RESPONSE_BYTES));
+      assertNotNull(record.getMetric(RpcMeasureConstants.RPC_CLIENT_REQUEST_BYTES));
+      assertNotNull(record.getMetric(RpcMeasureConstants.RPC_CLIENT_RESPONSE_BYTES));
     }
   }
 

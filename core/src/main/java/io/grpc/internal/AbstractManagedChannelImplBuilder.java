@@ -378,7 +378,6 @@ public abstract class AbstractManagedChannelImplBuilder
       // First interceptor runs last (see ClientInterceptors.intercept()), so that no
       // other interceptor can override the tracer factory we set in CallOptions.
       effectiveInterceptors.add(0, censusStats.getClientInterceptor());
-      //      }
     }
     if (tracingEnabled) {
       CensusTracingModule censusTracing =
