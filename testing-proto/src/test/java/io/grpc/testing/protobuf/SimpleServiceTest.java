@@ -76,6 +76,11 @@ public class SimpleServiceTest {
       expectedSpans.add(generateTraceSpanName(true, methodName));
     }
 
+    // The call to sleep is required because OpenCensus now registers span names asynchronously. It
+    // will be removed soon, because https://github.com/grpc/grpc-java/pull/3627 updates gRPC for
+    // the new asynchronous behavior and removes this test.
+    Thread.sleep(1000);
+
     SampledSpanStore sampledStore = Tracing.getExportComponent().getSampledSpanStore();
     Set<String> registeredSpans = sampledStore.getRegisteredSpanNamesForCollection();
     assertThat(registeredSpans).containsAllIn(expectedSpans);
