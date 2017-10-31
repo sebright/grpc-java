@@ -36,6 +36,14 @@ import io.grpc.DecompressorRegistry;
 import io.grpc.LoadBalancer;
 import io.grpc.MethodDescriptor;
 import io.grpc.NameResolver;
+import io.opencensus.common.Scope;
+import io.opencensus.stats.StatsRecord;
+import io.opencensus.stats.StatsRecorder;
+import io.opencensus.tags.TagContext;
+import io.opencensus.tags.TagContextBuilder;
+import io.opencensus.tags.Tagger;
+import io.opencensus.tags.propagation.TagContextBinarySerializer;
+import io.opencensus.tags.propagation.TagContextParseException;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.net.URI;
@@ -55,6 +63,60 @@ public class AbstractManagedChannelImplBuilderTest {
         public <ReqT, RespT> ClientCall<ReqT, RespT> interceptCall(
             MethodDescriptor<ReqT, RespT> method, CallOptions callOptions, Channel next) {
           return next.newCall(method, callOptions);
+        }
+      };
+
+  private static final Tagger DUMMY_TAGGER =
+      new Tagger() {
+        @Override
+        public TagContext empty() {
+          throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TagContext getCurrentTagContext() {
+          throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TagContextBuilder emptyBuilder() {
+          throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TagContextBuilder toBuilder(TagContext tags) {
+          throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TagContextBuilder currentBuilder() {
+          throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Scope withTagContext(TagContext tags) {
+          throw new UnsupportedOperationException();
+        }
+      };
+
+  private static final TagContextBinarySerializer DUMMY_TAG_CONTEXT_BINARY_SERIALIZER =
+      new TagContextBinarySerializer() {
+        @Override
+        public byte[] toByteArray(TagContext tags) {
+          throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public TagContext fromByteArray(byte[] bytes) throws TagContextParseException {
+          throw new UnsupportedOperationException();
+        }
+      };
+
+  private static final StatsRecorder DUMMY_STATS_RECORDER =
+      new StatsRecorder() {
+        @Override
+        public StatsRecord newRecord() {
+          throw new UnsupportedOperationException();
         }
       };
 
@@ -330,12 +392,12 @@ public class AbstractManagedChannelImplBuilderTest {
   static class Builder extends AbstractManagedChannelImplBuilder<Builder> {
     Builder(String target) {
       super(target);
-      statsImplementation(null, null, null);
+      statsImplementation(DUMMY_TAGGER, DUMMY_TAG_CONTEXT_BINARY_SERIALIZER, DUMMY_STATS_RECORDER);
     }
 
     Builder(SocketAddress directServerAddress, String authority) {
       super(directServerAddress, authority);
-      statsImplementation(null, null, null);
+      statsImplementation(DUMMY_TAGGER, DUMMY_TAG_CONTEXT_BINARY_SERIALIZER, DUMMY_STATS_RECORDER);
     }
 
     @Override
