@@ -64,12 +64,13 @@ public class StatsTestUtils {
 
   public static class MetricsRecord {
 
-    public final Map<TagKey, TagValue> tags;
+    public final ImmutableMap<TagKey, TagValue> tags;
     public final ImmutableMap<Measure, Number> metrics;
 
-    private MetricsRecord(Map<TagKey, TagValue> tags, Map<Measure, Number> metrics) {
+    private MetricsRecord(
+        ImmutableMap<TagKey, TagValue> tags, ImmutableMap<Measure, Number> metrics) {
       this.tags = tags;
-      this.metrics = ImmutableMap.copyOf(metrics);
+      this.metrics = metrics;
     }
 
     /**
@@ -113,6 +114,11 @@ public class StatsTestUtils {
   private static final String EXTRA_TAG_HEADER_VALUE_PREFIX = "extratag:";
   private static final String NO_EXTRA_TAG_HEADER_VALUE_PREFIX = "noextratag";
 
+  /**
+   * A {@link Tagger} implementation that saves metrics records to be accessible from {@link
+   * #pollRecord()} and {@link #pollRecord(long, TimeUnit)}, until {@link #rolloverRecords} is
+   * called.
+   */
   public static final class FakeStatsRecorder extends StatsRecorder {
 
     private BlockingQueue<MetricsRecord> records;
@@ -168,11 +174,7 @@ public class StatsTestUtils {
 
     @Override
     public FakeTagContextBuilder toBuilder(TagContext tags) {
-      Map<TagKey, TagValue> tagMap = Maps.newHashMap();
-      if (tags instanceof FakeTagContext) {
-        tagMap = ((FakeTagContext) tags).getTags();
-      }
-      return new FakeTagContextBuilder(tagMap);
+      return new FakeTagContextBuilder(getTags(tags));
     }
 
     @Override
@@ -207,9 +209,7 @@ public class StatsTestUtils {
 
     @Override
     public byte[] toByteArray(TagContext tags) {
-      // The default TagContext is a special case, because it isn't an instance of FakeTagContext.
-      TagValue extraTagValue =
-          tags instanceof FakeTagContext ? ((FakeTagContext) tags).getTags().get(EXTRA_TAG) : null;
+      TagValue extraTagValue = getTags(tags).get(EXTRA_TAG);
       if (extraTagValue == null) {
         return NO_EXTRA_TAG_HEADER_VALUE_PREFIX.getBytes(UTF_8);
       } else {
@@ -241,11 +241,7 @@ public class StatsTestUtils {
 
     @Override
     public void record(TagContext tags) {
-      Map<TagKey, TagValue> tagMap = Maps.newHashMap();
-      if (tags instanceof FakeTagContext) {
-        tagMap = ((FakeTagContext) tags).getTags();
-      } // tags could be NoopTagContext
-      recordSink.add(new MetricsRecord(tagMap, metrics));
+      recordSink.add(new MetricsRecord(getTags(tags), ImmutableMap.copyOf(metrics)));
     }
 
     @Override
@@ -265,7 +261,7 @@ public class StatsTestUtils {
       this.tags = tags;
     }
 
-    public Map<TagKey, TagValue> getTags() {
+    public ImmutableMap<TagKey, TagValue> getTags() {
       return tags;
     }
 
@@ -317,6 +313,13 @@ public class StatsTestUtils {
     public Scope buildScoped() {
       throw new UnsupportedOperationException();
     }
+  }
+
+  // This method handles the default TagContext, which isn't an instance of FakeTagContext.
+  private static ImmutableMap<TagKey, TagValue> getTags(TagContext tags) {
+    return tags instanceof FakeTagContext
+        ? ((FakeTagContext) tags).getTags()
+        : ImmutableMap.<TagKey, TagValue>of();
   }
 
   // TODO(bdrutu): Remove this class after OpenCensus releases support for this class.
