@@ -195,7 +195,7 @@ public abstract class AbstractInteropTest {
   protected static final Empty EMPTY = Empty.getDefaultInstance();
 
   protected static void startStaticServer(
-      AbstractServerImplBuilder<?> builder, ServerInterceptor... interceptors) {
+      AbstractServerImplBuilder<?> builder, ServerInterceptor ... interceptors) {
     testServiceExecutor = Executors.newScheduledThreadPool(2);
 
     List<ServerInterceptor> allInterceptors = ImmutableList.<ServerInterceptor>builder()
@@ -1893,7 +1893,7 @@ public abstract class AbstractInteropTest {
       assertThat(tracer.nextInboundEvent()).isEqualTo(String.format("inboundMessage(%d)", seqNo));
       assertThat(tracer.nextInboundEvent()).isEqualTo("inboundMessage()");
       assertThat(tracer.nextInboundEvent()).matches(
-          String.format("inboundMessageRead\\(%d, -?[0-9]+, -?[0-9]+\\)", seqNo));
+          String.format("inboundMessageRead\\(%d, -?[0-9]+, -?[0-9]+\\)", seqNo)); 
       uncompressedReceivedSize += msg.getSerializedSize();
       seqNo++;
     }
